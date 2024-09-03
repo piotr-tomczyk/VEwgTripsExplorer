@@ -13,6 +13,7 @@ export class TripService {
         aircraftType: string = '',
         maxLegTime: number // Time in hours
     ): { trip: Trip | null, aircraftType: string, callsign?: string | null } {
+        console.log({ startAirport, destinationAirport, desiredLegs, aircraftType, maxLegTime });
         const airports = this.processData(airportsToProcess);
         if (maxLegTime === 0) {
             maxLegTime = Infinity;

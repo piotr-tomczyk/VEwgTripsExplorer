@@ -95,4 +95,8 @@ export class FilterUtils {
 
         return hours + minutes + seconds;
     }
+
+    static filterRoutesNotFromBase(data: Route[]) {
+        return data.filter(route => route?.base === true);
+    }
 }
