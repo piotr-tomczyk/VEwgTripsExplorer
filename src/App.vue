@@ -174,8 +174,8 @@
     const routesAvailable = computed(() => routes.value.length + 1);
 
     const totalTripTime = computed<string>(() => {
-        if (foundTrip.value.legs?.length) {
-            const tripTimeInSeconds = foundTrip.value.legs.reduce((currentValue, leg) => {
+        if (foundTrip.value?.legs?.length) {
+            const tripTimeInSeconds = foundTrip.value?.legs?.reduce((currentValue, leg) => {
                 const legTime = allRoutes.value?.find((route) => route.icao === leg.start)?.destinations?.find((destination) => destination.icao === leg.end)?.time || '';
                 const [hours, minutes, seconds] = legTime.split(':').map(Number);
                 return hours * 3600 + minutes * 60 + seconds + currentValue;
@@ -261,7 +261,7 @@
     });
 
     watch(isStartAndReturnAtBase, () => {
-        localStorage.setItem('isStartAndReturnAtBase', isStartAndReturnAtBase.value);
+        localStorage.setItem('isStartAndReturnAtBase', `${isStartAndReturnAtBase.value}`);
         selectedDestination.value = null;
     });
 
@@ -377,7 +377,7 @@
         const tripService = new TripService();
         if (isStartAndReturnAtBase.value) {
             const isOddLeg = desiredLegs % 2 !== 0;
-            let numberOfEvenLegs = Math.floor(desiredLegs / 2) - isOddLeg;
+            let numberOfEvenLegs = Math.floor(desiredLegs / 2) - (isOddLeg ? 1 : 0);
 
             for (let j = 0; j < numberOfEvenLegs; j++) {
                 const generatedData = generateLegs(
@@ -393,6 +393,7 @@
                 if (generatedData.trip) {
                     tripsData.aircraftType = generatedData.aircraftType;
                     tripsData.trip.destination = destinationAirport;
+                    //@ts-ignore
                     tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
                 }
             }
@@ -411,10 +412,12 @@
                 if (generatedData.trip) {
                     tripsData.aircraftType = generatedData.aircraftType;
                     tripsData.trip.destination = destinationAirport;
+                    //@ts-ignore
                     tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
                 }
             }
         } else {
+            //@ts-ignore
             tripsData = generateLegs(
                 tripService,
                 routes.value,
