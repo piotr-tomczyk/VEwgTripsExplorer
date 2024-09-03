@@ -81,7 +81,7 @@
         <span v-if="isGeneratingRoute">
             Generating Route...
         </span>
-        <div v-if="foundTrip">
+        <div v-if="foundTrip?.legs?.length">
             <h2>Found Trip</h2>
             <p>
                 Aircraft:
@@ -171,8 +171,10 @@
             ? FilterUtils.filterRoutesNotFromBase(routes.value) : routes.value;
     });
 
+    const routesAvailable = computed(() => routes.value.length + 1);
+
     const totalTripTime = computed<string>(() => {
-        if (foundTrip.value) {
+        if (foundTrip.value.legs?.length) {
             const tripTimeInSeconds = foundTrip.value.legs.reduce((currentValue, leg) => {
                 const legTime = allRoutes.value?.find((route) => route.icao === leg.start)?.destinations?.find((destination) => destination.icao === leg.end)?.time || '';
                 const [hours, minutes, seconds] = legTime.split(':').map(Number);
@@ -258,8 +260,14 @@
         selectedDestination.value = null;
     });
 
+    watch(isStartAndReturnAtBase, () => {
+        localStorage.setItem('isStartAndReturnAtBase', isStartAndReturnAtBase.value);
+        selectedDestination.value = null;
+    });
+
     onMounted(() => {
         const lastVisitedCallsign = localStorage.getItem('lastVisited');
+        isStartAndReturnAtBase.value = localStorage.getItem('isStartAndReturnAtBase') === 'true';
         if (lastVisitedCallsign) {
             selectedCallsign.value = lastVisitedCallsign;
             const tripData = localStorage.getItem(selectedCallsign.value);
@@ -302,13 +310,16 @@
 
                     const tripsData = generateTrip(startAirport, destinationAirport);
 
-                    if (tripsData?.trip && selectedCallsign.value) {
+                    if (tripsData?.trip?.legs?.length && selectedCallsign.value) {
                         localStorage.setItem(selectedCallsign.value, JSON.stringify(tripsData));
                     }
 
                     foundTrip.value = tripsData?.trip ?? null;
                     generatedAircraftType.value = tripsData?.aircraftType ?? null;
                     generatedDeparture.value = destinationAirport;
+                    if (!tripsData?.trip?.legs?.length) {
+                        isError.value = true;
+                    }
                 } catch (error) {
                     isError.value = true;
                     console.log({ error });
@@ -324,7 +335,34 @@
         }
     }
 
-    function generateTrip(startAirport, destinationAirport) {
+    function generateLegs(
+        tripService: TripService,
+        routes: Route[],
+        startAirport: string,
+        destinationAirport: string,
+        legs: number,
+        aircraftType: string | undefined,
+        hoursLimit: number
+    ): { trip: Trip | null, aircraftType: string } {
+        for (let i = 0; i < 50; i++) {
+            const departureAirport = i === 0 ? startAirport : getRandomDepartureAirport()?.icao;
+            const generatedData = tripService.findTrip(
+                routes,
+                departureAirport,
+                destinationAirport,
+                legs,
+                aircraftType,
+                hoursLimit
+            );
+
+            if (generatedData.trip) {
+                return generatedData;
+            }
+        }
+        return { trip: null, aircraftType: '' };
+    }
+
+    function generateTrip(startAirport: string, destinationAirport: string) {
         const desiredHours = hoursLimit.value;
         const desiredLegs = legNumber.value;
 
@@ -340,71 +378,52 @@
         if (isStartAndReturnAtBase.value) {
             const isOddLeg = desiredLegs % 2 !== 0;
             let numberOfEvenLegs = Math.floor(desiredLegs / 2) - isOddLeg;
+
             for (let j = 0; j < numberOfEvenLegs; j++) {
-                for (let i = 0; i < 50; i++) {
-                    const departureAirport = i == 0 ? startAirport : getRandomDepartureAirport()?.icao;
-                    const generatedData = tripService.findTrip(
-                        // @ts-ignore
-                        routes.value,
-                        departureAirport,
-                        destinationAirport,
-                        3,
-                        selectedAircraft.value || undefined,
-                        desiredHours
-                    );
-                    console.log({ generatedData, tripsData });
-                    if (generatedData.trip) {
-                        tripsData.aircraftType = generatedData.aircraftType;
-                        tripsData.trip.destination = destinationAirport;
-                        tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
-                    }
-
-                    if ((generatedData.trip) || selectedDeparture.value?.icao) {
-                        break;
-                    }
-                }
-            }
-            if (isOddLeg) {
-                for (let i = 0; i < 50; i++) {
-                    const departureAirport = i == 0 ? startAirport : getRandomDepartureAirport()?.icao;
-                    const generatedData = tripService.findTrip(
-                        // @ts-ignore
-                        routes.value,
-                        departureAirport,
-                        destinationAirport,
-                        4,
-                        selectedAircraft.value || undefined,
-                        desiredHours
-                    );
-
-                    if (generatedData.trip) {
-                        tripsData.aircraftType = generatedData.aircraftType;
-                        tripsData.trip.destination = destinationAirport;
-                        tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
-                    }
-
-                    if ((generatedData.trip) || selectedDeparture.value?.icao) {
-                        break;
-                    }
-                }
-            }
-        } else {
-            for (let i = 0; i < 50; i++) {
-                const departureAirport = i == 0 ? startAirport : getRandomDepartureAirport()?.icao;
-                tripsData = tripService.findTrip(
-                    // @ts-ignore
+                const generatedData = generateLegs(
+                    tripService,
                     routes.value,
-                    departureAirport,
+                    startAirport,
                     destinationAirport,
-                    desiredLegs + 1,
+                    3,
                     selectedAircraft.value || undefined,
                     desiredHours
                 );
 
-                if ((tripsData.trip) || selectedDeparture.value?.icao) {
-                    break;
+                if (generatedData.trip) {
+                    tripsData.aircraftType = generatedData.aircraftType;
+                    tripsData.trip.destination = destinationAirport;
+                    tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
                 }
             }
+
+            if (isOddLeg) {
+                const generatedData = generateLegs(
+                    tripService,
+                    routes.value,
+                    startAirport,
+                    destinationAirport,
+                    4,
+                    selectedAircraft.value || undefined,
+                    desiredHours
+                );
+
+                if (generatedData.trip) {
+                    tripsData.aircraftType = generatedData.aircraftType;
+                    tripsData.trip.destination = destinationAirport;
+                    tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
+                }
+            }
+        } else {
+            tripsData = generateLegs(
+                tripService,
+                routes.value,
+                startAirport,
+                destinationAirport,
+                desiredLegs + 1,
+                selectedAircraft.value || undefined,
+                desiredHours
+            );
         }
         return tripsData;
     }
