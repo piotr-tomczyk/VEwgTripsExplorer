@@ -202,7 +202,7 @@
 
             return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
-    })
+    });
 
     //@ts-ignore
     const availableCallsigns = computed(() => FilterUtils.getAllCallsigns(allRoutes.value));

@@ -1,177 +1,421 @@
-<script>
-import ewgData from '../../src/static/ewg.json';
-import ewgAircrafts from '../../src/static/ewgAircrafts.json';
-import type { Trip, Route } from '../../src/types/types';
-import { TripService } from '../../src/services/trip-service';
-import { FilterUtils } from '../../src/utils/filters';
+<script lang="ts">
+    import ewgData from '../../../src/static/ewg.json';
+    import ewgAircrafts from '../../../src/static/ewgAircrafts.json';
+    import { type Route, type SearchModes, type Trip } from '../../../src/types/types';
+    import { FilterUtils } from '../../../src/utils/filters';
+    import { TripService } from '../../../src/services/trip-service';
 
-let selectedCallsign = '';
-let availableCallsigns = [];
-let hoursLimit = 0;
-let selectedAircraft = '';
+    let selectedCallsign: string | null = null;
+    let availableCallsigns = [];
+    let hoursLimit: number = 0;
+    let legNumber: number = 2;
+    const hoursLimitOptions: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let selectedAircraft: string | null = null;
+    let generatedAircraftType: string | null = null;
+    let selectedDeparture: Route | null = null;
+    let selectedDestination: Route | null = null;
+    let generatedDeparture: string | null = null;
+    let foundTrip: Trip | null = null;
+    let isStartAndReturnAtBase: boolean = false;
+    let isGeneratingRoute: boolean = false;
+    let isError: boolean = false;
 
-$: aircrafts = selectedCallsign ? ewgAircrafts[selectedCallsign] : ewgAircrafts['EWG'];
+    const selectedSearchMode: SearchModes = SearchModes.trips;
+    const legCountOptions: number[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 30, 50, 100];
 
-$: allRoutes = ewgData.routes.sort((a, b) => FilterUtils.sortAlphabetically(a.icao, b.icao));
+    $: aircrafts = selectedCallsign ? ewgAircrafts[selectedCallsign] : ewgAircrafts['EWG'];
 
-$: routes = getFilteredRoute(selectedCallsign, hoursLimit, selectedAircraft);
+    $: allRoutes = ewgData.routes.sort((a, b) => FilterUtils.sortAlphabetically(a.icao, b.icao));
 
-function getFilteredRoute(selectedCallsign, hoursLimit, selectedAircraft) {
-    const routeFilteredByCallsing = selectedCallsign
-        //@ts-ignore
-        ? FilterUtils.filterDataByCallsign(allRoutes, selectedCallsign)
-        : allRoutes.value;
+    $: routes = getFilteredRoute(selectedCallsign, hoursLimit, selectedAircraft);
 
-    const routeFilteredByHours = hoursLimit !== 0
-        ? FilterUtils.filterDataByHours(routeFilteredByCallsing, hoursLimit)
-        : routeFilteredByCallsing;
+    $: departureRoutes = isStartAndReturnAtBase ? FilterUtils.filterRoutesNotFromBase(routes) : routes;
 
-    const routesFilteredByAircraft = selectedAircraft
-        ? FilterUtils.filterDataByAircraft(routeFilteredByHours, selectedAircraft)
-        : routeFilteredByHours;
+    $: totalTurnaroundTimeInSeconds = foundTrip ? ((foundTrip as Trip).legs.length - 1) * 35 * 60 : 0;
 
-    return routesFilteredByAircraft;
-}
+    $: totalTripTime = getTotalTripTime(foundTrip, allRoutes, totalTurnaroundTimeInSeconds);
+
+    $: totalTurnaroundTime = getTotalTurnaroundTime(totalTurnaroundTimeInSeconds);
+
+    function getFilteredRoute(selectedCallsign, hoursLimit, selectedAircraft) {
+        const routeFilteredByCallsing = selectedCallsign
+            //@ts-ignore
+            ? FilterUtils.filterDataByCallsign(allRoutes, selectedCallsign)
+            : allRoutes;
+
+        const routeFilteredByHours = hoursLimit !== 0
+            ? FilterUtils.filterDataByHours(routeFilteredByCallsing, hoursLimit)
+            : routeFilteredByCallsing;
+
+        const routesFilteredByAircraft = selectedAircraft
+            ? FilterUtils.filterDataByAircraft(routeFilteredByHours, selectedAircraft)
+            : routeFilteredByHours;
+
+        return routesFilteredByAircraft;
+    }
+
+    function getTotalTripTime(foundTrip, allRoutes, totalTurnaroundTimeInSeconds) {
+        if (foundTrip?.legs?.length) {
+            const tripTimeInSeconds = foundTrip?.legs?.reduce((currentValue, leg) => {
+                const legTime = allRoutes?.find(
+                    (route) => route.icao === leg.start
+                )?.destinations?.find(
+                    (destination) => destination.icao === leg.end
+                )?.time || '';
+
+                const [hours, minutes, seconds] = legTime.split(':').map(Number);
+                return hours * 3600 + minutes * 60 + seconds + currentValue;
+            }, 0);
+
+            const tripAndTournaroundTime = tripTimeInSeconds + totalTurnaroundTimeInSeconds;
+
+            const hours = Math.floor(tripAndTournaroundTime / 3600);
+            const minutes = Math.floor((tripAndTournaroundTime % 3600) / 60);
+            const seconds = tripAndTournaroundTime % 60;
+
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+        return '';
+    }
+
+    function getTotalTurnaroundTime(totalTurnaroundTimeInSeconds, ) {
+        if (foundTrip) {
+            const hours = Math.floor(totalTurnaroundTimeInSeconds / 3600);
+            const minutes = Math.floor((totalTurnaroundTimeInSeconds % 3600) / 60);
+            const seconds = totalTurnaroundTimeInSeconds % 60;
+
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }
+
+    function calculateLegs() {
+        if (isGeneratingRoute) {
+            return;
+        }
+
+        isError = false;
+
+        switch (selectedSearchMode) {
+            case SearchModes.legs:
+                console.log('Legs');
+                break;
+            case SearchModes.trips:
+                const isSelectedAircraft = !!selectedAircraft;
+                selectedAircraft ??=  getRandomAircraft();
+                const startAirport = selectedDeparture?.icao ?? getRandomDepartureAirport()?.icao;
+                const destinationAirport = selectedDestination?.icao ?? startAirport;
+
+                generatedAircraftType = null;
+                foundTrip = null;
+                try {
+                    isGeneratingRoute = true;
+
+                    const tripsData = generateTrip(startAirport, destinationAirport);
+
+                    if (tripsData?.trip?.legs?.length && selectedCallsign) {
+                        localStorage.setItem(selectedCallsign, JSON.stringify(tripsData));
+                    }
+
+                    foundTrip = tripsData?.trip ?? null;
+                    generatedAircraftType = tripsData?.aircraftType ?? null;
+                    generatedDeparture = destinationAirport;
+                    if (!tripsData?.trip?.legs?.length) {
+                        isError = true;
+                    }
+                } catch (error) {
+                    isError = true;
+                    console.log({ error });
+                } finally {
+                    if (!isSelectedAircraft) {
+                        selectedAircraft = null;
+                    }
+                    isGeneratingRoute = false;
+                }
+                break;
+            default:
+                console.log('Default');
+        }
+    }
+
+    function generateTrip(startAirport: string, destinationAirport: string) {
+        const desiredHours = hoursLimit;
+        const desiredLegs = legNumber;
+
+        let tripsData = {
+            aircraftType: '',
+            trip: {
+                destination: '',
+                legs: [],
+            }
+        };
+
+        const tripService = new TripService();
+        if (isStartAndReturnAtBase) {
+            const isOddLeg = desiredLegs % 2 !== 0;
+            let numberOfEvenLegs = Math.floor(desiredLegs / 2) - (isOddLeg ? 1 : 0);
+
+            for (let j = 0; j < numberOfEvenLegs; j++) {
+                const generatedData = generateLegs(
+                    tripService,
+                    routes,
+                    startAirport,
+                    destinationAirport,
+                    3,
+                    selectedAircraft || undefined,
+                    desiredHours
+                );
+
+                if (generatedData.trip) {
+                    tripsData.aircraftType = generatedData.aircraftType;
+                    tripsData.trip.destination = destinationAirport;
+                    //@ts-ignore
+                    tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
+                }
+            }
+
+            if (isOddLeg) {
+                const generatedData = generateLegs(
+                    tripService,
+                    routes,
+                    startAirport,
+                    destinationAirport,
+                    4,
+                    selectedAircraft || undefined,
+                    desiredHours
+                );
+
+                if (generatedData.trip) {
+                    tripsData.aircraftType = generatedData.aircraftType;
+                    tripsData.trip.destination = destinationAirport;
+                    //@ts-ignore
+                    tripsData.trip.legs = tripsData.trip.legs.concat(generatedData.trip.legs);
+                }
+            }
+        } else {
+            //@ts-ignore
+            tripsData = generateLegs(
+                tripService,
+                routes,
+                startAirport,
+                destinationAirport,
+                desiredLegs + 1,
+                selectedAircraft || undefined,
+                desiredHours
+            );
+        }
+        return tripsData;
+    }
+
+    function generateLegs(
+        tripService: TripService,
+        routes: Route[],
+        startAirport: string,
+        destinationAirport: string,
+        legs: number,
+        aircraftType: string | undefined,
+        hoursLimit: number
+    ): { trip: Trip | null, aircraftType: string } {
+        for (let i = 0; i < 50; i++) {
+            const departureAirport = i === 0 ? startAirport : getRandomDepartureAirport()?.icao;
+            //@ts-ignore
+            const generatedData = tripService.findTrip(
+                routes,
+                departureAirport,
+                destinationAirport,
+                legs,
+                aircraftType,
+                hoursLimit
+            );
+
+            if (generatedData.trip) {
+                return generatedData;
+            }
+        }
+        return { trip: null, aircraftType: '' };
+    }
+
+    function getRandomDepartureAirport() {
+        return departureRoutes[Math.floor(Math.random() * departureRoutes?.length)];
+    }
+
+    function getRandomAircraft() {
+        const aircraftsToProcess = selectedDeparture
+            ? selectedDeparture?.aircrafts.filter(
+                (aircraft) => aircrafts.find((aircraftType) => aircraftType === aircraft))
+            : aircrafts;
+        return aircraftsToProcess?.[Math.floor(Math.random() * aircraftsToProcess?.length)];
+    }
 </script>
 
 <div class="popup-body ewg-theme">
-  <div class="form-container">
-    <div>
-      <span> Airline: </span>
-      <select bind:value={selectedCallsign}>
-        {#each availableCallsigns as callsign (callsign)}
-            <option>
-              {{ callsign }}
-            </option>
-        {/each}
-      </select>
+    <div class="form-container">
+        <div>
+            <span> Airline: </span>
+            <select bind:value={selectedCallsign}>
+                {#each availableCallsigns as callsign (callsign)}
+                    <option value="{callsign}">
+                        { callsign }
+                    </option>
+                {/each}
+            </select>
+        </div>
+        <div>
+            <span> Aircraft: </span>
+            {#if aircrafts?.length}
+                <select bind:value="{selectedAircraft}">
+                    {#if aircrafts?.length}
+                        <option value="{ null }" />
+                    {/if}
+                    {#each aircrafts as aircraft (aircraft)}
+                        <option value="{aircraft}">
+                            {aircraft}
+                        </option>
+                    {/each}
+                </select>
+            {/if}
+        </div>
+        <div>
+            <span> Departure: </span>
+            <select bind:value={selectedDeparture}>
+                {#if routes?.length}
+                    <option value="{null}" />
+                {/if}
+                {#each departureRoutes as airport (airport)}
+                    <option value="{airport}">
+                        { airport.icao } ( { airport.name } )
+                    </option>
+                {/each}
+            </select>
+            <span style="display: flex; align-items: center; margin-top: 5px;">
+                <label for="returnToBase">
+                    Start and return at base:
+                </label>
+                <input
+                    type="checkbox"
+                    id="return-to-base"
+                    name="returnToBase"
+                    checked="{isStartAndReturnAtBase}"
+                    on:click="{() => { isStartAndReturnAtBase = !isStartAndReturnAtBase }}" />
+            </span>
+        </div>
+        {#if selectedDeparture && !isStartAndReturnAtBase}
+            <div>
+                <span> Destination: </span>
+                <select bind:value="{selectedDestination}">
+                    {#if routes?.length}
+                        <option value="{null}" />
+                    {/if}
+                    {#each routes as airport (airport)}
+                        <option value="{airport}">
+                            { airport.icao } ( { airport.name } )
+                        </option>
+                    {/each}
+                </select>
+            </div>
+        {/if}
+        <div>
+            <span> Leg number: </span>
+            <select bind:value="{legNumber}">
+                {#each legCountOptions as leg (leg)}
+                    <option value="{leg}">
+                        { leg }
+                    </option>
+                {/each}
+            </select>
+        </div>
+        <div>
+            <span> Hour Limit per leg: </span>
+            <select bind:value="{hoursLimit}">
+                {#each hoursLimitOptions as hour (hour)}
+                    <option value="{hour}">
+                        { hour > 0 ? hour : 'No limit' }
+                    </option>
+                {/each}
+            </select>
+        </div>
     </div>
-    <div>
-      <span> Aircraft: </span>
-      <select v-model="selectedAircraft">
-        <option
-          v-if="aircrafts?.length"
-          :value="null">
-        </option>
-        <option v-for="aircraft in aircrafts" :key="aircraft" :value="aircraft">
-          {{ aircraft }}
-        </option>
-      </select>
-    </div>
-    <div>
-      <span> Departure: </span>
-      <select v-model="selectedDeparture">
-        <option
-          v-if="routes?.length"
-          :value="null">
-        </option>
-        <option v-for="airport in departureRoutes" :key="airport.id" :value="airport">
-          {{ airport.icao }} ( {{ airport.name }} )
-        </option>
-      </select>
-      <span style="display: flex; align-items: center; margin-top: 5px;">
-                    <label for="returnToBase">
-                        Start and return at base:
-                    </label>
-                    <input type="checkbox" id="return-to-base" name="returnToBase" :checked="isStartAndReturnAtBase" @click="isStartAndReturnAtBase = !isStartAndReturnAtBase" />
-                </span>
-    </div>
-    <div v-if="selectedDeparture && !isStartAndReturnAtBase">
-      <span> Destination: </span>
-      <select
-        v-model="selectedDestination">
-        <option
-          v-if="routes?.length"
-          :value="null">
-        </option>
-        <option v-for="airport in routes" :key="airport.id" :value="airport">
-          {{ airport.icao }} ( {{ airport.name }} )
-        </option>
-      </select>
-    </div>
-    <div>
-      <span> Leg number: </span>
-      <select
-        v-model="legNumber">
-        <option v-for="leg in legCountOptions" :key="leg" :value="leg">
-          {{ leg }}
-        </option>
-      </select>
-    </div>
-    <div>
-      <span> Hour Limit per leg: </span>
-      <select
-        v-model="hoursLimit">
-        <option v-for="hour in hoursLimitOptions" :key="hour" :value="hour">
-          {{ hour > 0 ? hour : 'No limit' }}
-        </option>
-      </select>
-    </div>
-  </div>
-  <button
-    class="search-button"
-    :disabled="isGeneratingRoute"
-    @click="calculateLegs">
-    Search
-  </button>
+    <button
+        class="search-button"
+        disabled="{isGeneratingRoute}"
+        on:click="{calculateLegs}">
+        Search
+    </button>
 
-  <span v-if="isGeneratingRoute">
+    {#if isGeneratingRoute}
+        <span>
             Generating Route...
         </span>
-  <div v-if="foundTrip?.legs?.length">
-    <h2>Found Trip</h2>
-    <p>
-      Aircraft:
-      <span class="generated-aircraft-type">
-                    {{ generatedAircraftType }}
+    {/if}
+    {#if foundTrip?.legs?.length}
+        <div>
+            <h2>Found Trip</h2>
+            <p>
+                Aircraft:
+                <span class="generated-aircraft-type">
+                    { generatedAircraftType }
                 </span>
-    </p>
-    <h2> Route: </h2>
-    <table>
-      <thead>
-      <tr>
-        <th>#</th>
-        <th>Origin</th>
-        <th>Destination</th>
-        <th>Duration</th>
-      </tr>
-      </thead>
-      <tbody>
-      <tr v-for="(leg, index) in foundTrip?.legs">
-        <td>{{ index + 1 }}</td>
-        <td>{{ leg.start }}</td>
-        <td>{{ leg.end }}</td>
-        <td>
-          {{ allRoutes?.find((route) => route.icao === leg.start)?.destinations?.find((destination) => destination.icao === leg.end)?.time }}
-        </td>
-      </tr>
-      <tr>
-        <td v-if="!totalTripTime?.includes('NaN') && !totalTurnaroundTime?.includes('NaN')" colspan="4">
-          Total trip time: <span style="font-weight: bold"> {{ totalTripTime }} </span> (includes {{ totalTurnaroundTime }} of turnaroud)
-        </td>
-      </tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="error-message" v-else-if="generatedAircraftType || isError">
-            <span v-if="routes?.length === 0">
-                No possible trip found for selected parameters. Try changing parameters.
+            </p>
+            <h2> Route: </h2>
+            <table>
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Origin</th>
+                    <th>Destination</th>
+                    <th>Duration</th>
+                </tr>
+                </thead>
+                <tbody>
+                {#each foundTrip as leg, index (leg)}
+                    <tr>
+                        <td> { index + 1 } </td>
+                        <td> { leg.start } </td>
+                        <td> { leg.end } </td>
+                        <td>
+                            {
+                                allRoutes?.find(
+                                    (route) => route.icao === leg.start
+                                )?.destinations?.find(
+                                        (destination) => destination.icao === leg.end
+                                )?.time
+                            }
+                        </td>
+                    </tr>
+                {/each}
+                <tr>
+                    {#if totalTripTime?.includes('NaN') && !totalTurnaroundTime?.includes('NaN')}
+                        <td colspan="4">
+                            Total trip time:
+                            <span style="font-weight: bold">
+                                { totalTripTime }
+                            </span>
+                            (includes { totalTurnaroundTime } of turnaroud)
+                        </td>
+                    {/if}
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    {:else if generatedAircraftType || isError}
+        <div class="error-message">
+            {#if routes?.length === 0}
+                <span>
+                    No possible trip found for selected parameters. Try changing parameters.
+                </span>
+            {:else if generatedAircraftType}
+                <span>
+                        No trip found for generated aircraft:
+                    { generatedAircraftType }  and { generatedDeparture } departure airport,
+                        it might take a few attempts. Try changing parameters or search again.
+                </span>
+            {:else}
+            <span>
+                    No trip found for selected parameters. Try changing parameters or search again.
             </span>
-    <span v-else-if="generatedAircraftType">
-                No trip found for generated aircraft:
-      {{ generatedAircraftType }}  and {{generatedDeparture}} departure airport,
-                it might take a few attempts. Try changing parameters or search again.
-            </span>
-    <span v-else>
-                No trip found for selected parameters. Try changing parameters or search again.
-            </span>
-  </div>
+            {/if}
+        </div>
+    {/if}
 </div>
-
-
-
-
-
 
 <style>
     .popup-body {

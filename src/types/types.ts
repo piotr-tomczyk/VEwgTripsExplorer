@@ -41,3 +41,8 @@ export enum airlines {
     AMERICAN = "vAAL",
     UNITED = "VirtUAL",
 }
+
+export enum SearchModes {
+    legs = 'Legs',
+    trips = 'Trips',
+}
