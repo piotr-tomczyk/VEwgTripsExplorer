@@ -43,6 +43,6 @@ export enum airlines {
 }
 
 export enum SearchModes {
-    legs = 'Legs',
-    trips = 'Trips',
+    legs = 'legs',
+    trips = 'trips',
 }

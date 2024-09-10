@@ -1,12 +1,11 @@
 <script lang="ts">
-    import ewgData from '../../../src/static/ewg.json';
-    import ewgAircrafts from '../../../src/static/ewgAircrafts.json';
-    import { type Route, type SearchModes, type Trip } from '../../../src/types/types';
-    import { FilterUtils } from '../../../src/utils/filters';
-    import { TripService } from '../../../src/services/trip-service';
+    import ewgData from '../static/ewg.json';
+    import ewgAircrafts from '../static/ewgAircrafts.json';
+    import  { type Route, SearchModes, type Trip } from '../types/types';
+    import { FilterUtils } from '../utils/filters';
+    import { TripService } from '../services/trip-service';
 
     let selectedCallsign: string | null = null;
-    let availableCallsigns = [];
     let hoursLimit: number = 0;
     let legNumber: number = 2;
     const hoursLimitOptions: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -36,6 +35,9 @@
     $: totalTripTime = getTotalTripTime(foundTrip, allRoutes, totalTurnaroundTimeInSeconds);
 
     $: totalTurnaroundTime = getTotalTurnaroundTime(totalTurnaroundTimeInSeconds);
+
+    $: availableCallsigns = FilterUtils.getAllCallsigns(allRoutes);
+
 
     function getFilteredRoute(selectedCallsign, hoursLimit, selectedAircraft) {
         const routeFilteredByCallsing = selectedCallsign
@@ -366,7 +368,7 @@
                 </tr>
                 </thead>
                 <tbody>
-                {#each foundTrip as leg, index (leg)}
+                {#each foundTrip?.legs as leg, index (leg)}
                     <tr>
                         <td> { index + 1 } </td>
                         <td> { leg.start } </td>

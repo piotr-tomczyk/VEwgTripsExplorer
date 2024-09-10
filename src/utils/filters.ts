@@ -1,4 +1,4 @@
-import { Destination, Route } from '../types/types';
+import type { Destination, Route } from '../types/types';
 
 const IMPORTANT_CALLSIGNS = ['EZY'];
 export class FilterUtils {

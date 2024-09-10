@@ -1,4 +1,4 @@
-import { Route, Trip, Airport } from '../types/types';
+import type { Route, Trip, Airport } from '../types/types';
 import { FilterUtils } from '../utils/filters';
 
 export class TripService {
